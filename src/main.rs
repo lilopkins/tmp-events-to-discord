@@ -18,6 +18,7 @@ use serenity::all::Timestamp;
 use serenity::async_trait;
 use serenity::prelude::*;
 use tracing::Level;
+use tracing_subscriber::EnvFilter;
 use tracing_subscriber::FmtSubscriber;
 
 const TMP_BASE_URL: &str = "https://truckersmp.com";
@@ -123,9 +124,7 @@ impl EventHandler for Handler {
 async fn main() -> anyhow::Result<()> {
     // a builder for `FmtSubscriber`.
     let subscriber = FmtSubscriber::builder()
-        // all spans/events with a level higher than TRACE (e.g, debug, info, warn, etc.)
-        // will be written to stdout.
-        .with_max_level(Level::DEBUG)
+        .with_env_filter(EnvFilter::from_default_env())
         // completes the builder.
         .finish();
 
