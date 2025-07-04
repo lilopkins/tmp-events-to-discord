@@ -1,3 +1,5 @@
+#![warn(clippy::pedantic)]
+
 mod tmp_response;
 
 use std::env;
@@ -63,6 +65,7 @@ impl EventHandler for Handler {
         }
 
         // Add new events
+        let re = Regex::new(MARKDOWN_IMAGE_REGEX).unwrap();
         for event in new_events {
             let start_time: NaiveDateTime =
                 NaiveDateTime::parse_from_str(event.start_at(), "%Y-%m-%d %H:%M:%S")
@@ -80,8 +83,7 @@ impl EventHandler for Handler {
 
             let desc_suffix = format!("\n\n### {} ###", event.id());
 
-            let desc = event.description().clone().replace("\r", "");
-            let re = Regex::new(MARKDOWN_IMAGE_REGEX).unwrap();
+            let desc = event.description().clone().replace('\r', "");
             let mut desc = re.replace_all(&desc, "").to_string();
 
             let mut truncate_at = 1000 - desc_prefix.len() - desc_suffix.len();
@@ -129,7 +131,7 @@ async fn main() -> anyhow::Result<()> {
 
     tracing::subscriber::set_global_default(subscriber).expect("setting default subscriber failed");
 
-    dotenv::dotenv()?;
+    dotenvy::dotenv()?;
 
     tracing::info!("Fetching events from TMP");
 
