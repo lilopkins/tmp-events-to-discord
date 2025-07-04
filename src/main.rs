@@ -6,18 +6,19 @@ use std::env;
 use std::process;
 use std::time::Duration;
 
+use anyhow::Context;
 use chrono::Local;
 use chrono::NaiveDateTime;
 use chrono::Utc;
 use regex::Regex;
 use serenity::all::CreateAttachment;
 use serenity::all::CreateScheduledEvent;
+use serenity::all::GuildId;
 use serenity::all::Ready;
 use serenity::all::ScheduledEventType;
 use serenity::all::Timestamp;
 use serenity::async_trait;
 use serenity::prelude::*;
-use tracing::Level;
 use tracing_subscriber::EnvFilter;
 use tracing_subscriber::FmtSubscriber;
 
@@ -30,24 +31,16 @@ struct Handler {
     data: Vec<tmp_response::EventIndex>,
 }
 
-#[async_trait]
-impl EventHandler for Handler {
-    async fn ready(&self, ctx: Context, ready: Ready) {
-        tracing::info!("{} is connected!", ready.user.name);
-
-        if ready.guilds.len() != 1 {
-            tracing::error!("This only functions with a bot in only one guild.");
-            process::exit(1);
-        }
-
-        let guild = ready.guilds.first().unwrap();
-        let guild_id = guild.id;
-        tracing::info!("Working on guild: {guild_id}");
-
+impl Handler {
+    async fn process_events(
+        &self,
+        guild_id: &GuildId,
+        ctx: &serenity::client::Context,
+    ) -> anyhow::Result<()> {
         let events = guild_id
             .scheduled_events(ctx.http(), false)
             .await
-            .expect("failed to get events");
+            .context("failed to get events")?;
         let mut new_events = vec![];
 
         // Figure out what events are new
@@ -66,6 +59,7 @@ impl EventHandler for Handler {
         }
 
         // Add new events
+        // SAFETY: The regex is checked externally
         let re = Regex::new(MARKDOWN_IMAGE_REGEX).unwrap();
         for event in new_events {
             let start_time: NaiveDateTime =
@@ -113,7 +107,31 @@ impl EventHandler for Handler {
             guild_id
                 .create_scheduled_event(&ctx, ev)
                 .await
-                .expect("Failed to create new event");
+                .context("Failed to create new event")?;
+        }
+
+        Ok(())
+    }
+}
+
+#[async_trait]
+impl EventHandler for Handler {
+    async fn ready(&self, ctx: serenity::client::Context, ready: Ready) {
+        tracing::info!("{} is connected!", ready.user.name);
+
+        if ready.guilds.len() != 1 {
+            tracing::error!("This only functions with a bot in only one guild.");
+            process::exit(1);
+        }
+
+        // SAFETY: Length is checked prior
+        let guild = ready.guilds.first().unwrap();
+        let guild_id = guild.id;
+        tracing::info!("Working on guild: {guild_id}");
+
+        if let Err(e) = self.process_events(&guild_id, &ctx).await {
+            eprintln!("{e:?}");
+            process::exit(1);
         }
 
         process::exit(0);
@@ -128,14 +146,15 @@ async fn main() -> anyhow::Result<()> {
         // completes the builder.
         .finish();
 
-    tracing::subscriber::set_global_default(subscriber).expect("setting default subscriber failed");
+    tracing::subscriber::set_global_default(subscriber)
+        .context("setting default subscriber failed")?;
 
     dotenvy::dotenv()?;
 
     tracing::info!("Fetching events from TMP");
 
     // Fetch events from TMP
-    let tmp_id = env::var("TMP_ID").expect("Expected a TMP ID in the environment");
+    let tmp_id = env::var("TMP_ID").context("Expected a TMP ID in the environment")?;
     let data_created: tmp_response::Response = reqwest::get(EVENT_API_URL.replace("{id}", &tmp_id))
         .await?
         .json()
@@ -164,13 +183,13 @@ async fn main() -> anyhow::Result<()> {
 
     // Login with a bot token from the environment
     tracing::info!("Connecting to Discord...");
-    let token = env::var("DISCORD_TOKEN").expect("Expected a token in the environment");
+    let token = env::var("DISCORD_TOKEN").context("Expected a token in the environment")?;
 
     // Create a new instance of the Client, logging in as a bot.
     let mut client = Client::builder(&token, GatewayIntents::empty())
         .event_handler(Handler { data })
         .await
-        .expect("Err creating client");
+        .context("Error creating Discord client")?;
 
     // Start listening for events by starting a single shard
     client.start().await?;
